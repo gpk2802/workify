@@ -4,6 +4,12 @@ import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Progress } from '@/components/ui/progress';
+import { Users, Briefcase, FileText, TrendingUp, BarChart3, Target, CheckCircle, AlertTriangle } from 'lucide-react';
 
 interface User {
   id: string;
@@ -43,6 +49,37 @@ interface DashboardStats {
   totalTailors: number;
 }
 
+interface FeedbackAnalytics {
+  total_feedback: number;
+  avg_probability: number;
+  high_probability_percentage: number;
+  top_strengths: Array<{ strength: string; count: number }>;
+  common_gaps: Array<{ gap: string; count: number }>;
+}
+
+interface Feedback {
+  id: string;
+  user_id: string;
+  job_id: string;
+  tailor_id: string;
+  selection_probability: number;
+  semantic_similarity_score: number;
+  skill_coverage_score: number;
+  experience_alignment_score: number;
+  strengths: any[];
+  gaps: any[];
+  recommendations: any[];
+  created_at: string;
+  users: User;
+  jobs: {
+    title: string;
+    company: string;
+  };
+  tailors: {
+    fit_score: number;
+  };
+}
+
 export default function AdminDashboard() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
@@ -50,7 +87,9 @@ export default function AdminDashboard() {
   const [users, setUsers] = useState<User[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
   const [filteredApplications, setFilteredApplications] = useState<Application[]>([]);
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'applications'>('overview');
+  const [feedback, setFeedback] = useState<Feedback[]>([]);
+  const [feedbackAnalytics, setFeedbackAnalytics] = useState<FeedbackAnalytics | null>(null);
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'applications' | 'feedback'>('overview');
   const [loading, setLoading] = useState(true);
   const [outcomeFilter, setOutcomeFilter] = useState<string>('all');
   const [userFilter, setUserFilter] = useState<string>('all');
@@ -87,11 +126,12 @@ export default function AdminDashboard() {
     
     try {
       // Load stats
-      const [usersResult, applicationsResult, jobsResult, tailorsResult] = await Promise.all([
+      const [usersResult, applicationsResult, jobsResult, tailorsResult, feedbackResult] = await Promise.all([
         supabase.from('users').select('id, is_active'),
         supabase.from('applications').select('id, status'),
         supabase.from('jobs').select('id'),
-        supabase.from('tailors').select('id')
+        supabase.from('tailors').select('id'),
+        supabase.from('feedback').select('id')
       ]);
 
       const totalUsers = usersResult.data?.length || 0;
@@ -100,6 +140,7 @@ export default function AdminDashboard() {
       const pendingApplications = applicationsResult.data?.filter(a => a.status === 'submitted').length || 0;
       const totalJobs = jobsResult.data?.length || 0;
       const totalTailors = tailorsResult.data?.length || 0;
+      const totalFeedback = feedbackResult.data?.length || 0;
 
       setStats({
         totalUsers,
@@ -133,10 +174,48 @@ export default function AdminDashboard() {
 
       setApplications(applicationsData || []);
       setFilteredApplications(applicationsData || []);
+
+      // Load feedback data
+      await loadFeedbackData();
     } catch (error) {
       console.error('Error loading dashboard data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadFeedbackData = async () => {
+    const supabase = createClient();
+    
+    try {
+      // Load feedback data
+      const { data: feedbackData, error: feedbackError } = await supabase
+        .from('feedback')
+        .select(`
+          *,
+          users!feedback_user_id_fkey(id, email, name),
+          jobs!feedback_job_id_fkey(title, company),
+          tailors!feedback_tailor_id_fkey(fit_score)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (feedbackError) {
+        console.error('Error loading feedback:', feedbackError);
+      } else {
+        setFeedback(feedbackData || []);
+      }
+
+      // Load feedback analytics
+      const { data: analyticsData, error: analyticsError } = await supabase
+        .rpc('get_system_feedback_analytics', { months: 3 });
+
+      if (analyticsError) {
+        console.error('Error loading feedback analytics:', analyticsError);
+      } else {
+        setFeedbackAnalytics(analyticsData?.[0] || null);
+      }
+    } catch (error) {
+      console.error('Error loading feedback data:', error);
     }
   };
 
@@ -270,7 +349,8 @@ export default function AdminDashboard() {
             {[
               { id: 'overview', name: 'Overview' },
               { id: 'users', name: 'Users' },
-              { id: 'applications', name: 'Applications' }
+              { id: 'applications', name: 'Applications' },
+              { id: 'feedback', name: 'Feedback Analytics' }
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -472,11 +552,54 @@ export default function AdminDashboard() {
         {activeTab === 'applications' && (
           <div className="bg-white shadow overflow-hidden sm:rounded-md">
             <div className="px-4 py-5 sm:px-6">
-              <h3 className="text-lg leading-6 font-medium text-gray-900">Application Management</h3>
-              <p className="mt-1 max-w-2xl text-sm text-gray-500">Track and manage job applications</p>
+              <div className="flex justify-between items-center">
+                <div>
+                  <h3 className="text-lg leading-6 font-medium text-gray-900">Application Management</h3>
+                  <p className="mt-1 max-w-2xl text-sm text-gray-500">Track and manage job applications</p>
+                </div>
+                <button
+                  onClick={exportToCSV}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium"
+                >
+                  Export CSV
+                </button>
+              </div>
+              
+              {/* Filters */}
+              <div className="mt-4 flex space-x-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Filter by Outcome</label>
+                  <select
+                    value={outcomeFilter}
+                    onChange={(e) => setOutcomeFilter(e.target.value)}
+                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm text-sm"
+                  >
+                    <option value="all">All Outcomes</option>
+                    <option value="Interview">Interview</option>
+                    <option value="Rejected">Rejected</option>
+                    <option value="No Response">No Response</option>
+                    <option value="Hired">Hired</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Filter by User</label>
+                  <select
+                    value={userFilter}
+                    onChange={(e) => setUserFilter(e.target.value)}
+                    className="mt-1 block w-full border-gray-300 rounded-md shadow-sm text-sm"
+                  >
+                    <option value="all">All Users</option>
+                    {users.map((user) => (
+                      <option key={user.id} value={user.id}>
+                        {user.name || user.email}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
             </div>
             <ul className="divide-y divide-gray-200">
-              {applications.map((application) => (
+              {filteredApplications.map((application) => (
                 <li key={application.id}>
                   <div className="px-4 py-4">
                     <div className="flex items-center justify-between">
@@ -502,24 +625,222 @@ export default function AdminDashboard() {
                           </div>
                         </div>
                       </div>
-                      <div className="ml-4 flex-shrink-0">
-                        <select
-                          value={application.status}
-                          onChange={(e) => updateApplicationStatus(application.id, e.target.value)}
-                          className="text-sm border-gray-300 rounded-md"
-                        >
-                          <option value="submitted">Submitted</option>
-                          <option value="reviewed">Reviewed</option>
-                          <option value="interviewed">Interviewed</option>
-                          <option value="accepted">Accepted</option>
-                          <option value="rejected">Rejected</option>
-                        </select>
+                      <div className="ml-4 flex-shrink-0 flex flex-col space-y-2">
+                        <div className="flex space-x-2">
+                          <select
+                            value={application.status}
+                            onChange={(e) => updateApplicationStatus(application.id, e.target.value)}
+                            className="text-sm border-gray-300 rounded-md"
+                          >
+                            <option value="submitted">Submitted</option>
+                            <option value="reviewed">Reviewed</option>
+                            <option value="interviewed">Interviewed</option>
+                            <option value="accepted">Accepted</option>
+                            <option value="rejected">Rejected</option>
+                          </select>
+                          <select
+                            value={application.outcome || ''}
+                            onChange={(e) => updateApplicationOutcome(application.id, e.target.value)}
+                            className="text-sm border-gray-300 rounded-md"
+                          >
+                            <option value="">Set Outcome</option>
+                            <option value="Interview">Interview</option>
+                            <option value="Rejected">Rejected</option>
+                            <option value="No Response">No Response</option>
+                            <option value="Hired">Hired</option>
+                          </select>
+                        </div>
+                        <div className="flex space-x-1">
+                          <button
+                            onClick={() => updateApplicationOutcome(application.id, 'Interview')}
+                            className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded hover:bg-blue-200"
+                          >
+                            Interview
+                          </button>
+                          <button
+                            onClick={() => updateApplicationOutcome(application.id, 'Rejected')}
+                            className="px-2 py-1 text-xs bg-red-100 text-red-800 rounded hover:bg-red-200"
+                          >
+                            Reject
+                          </button>
+                          <button
+                            onClick={() => updateApplicationOutcome(application.id, 'Hired')}
+                            className="px-2 py-1 text-xs bg-green-100 text-green-800 rounded hover:bg-green-200"
+                          >
+                            Hire
+                          </button>
+                          <button
+                            onClick={() => updateApplicationOutcome(application.id, 'No Response')}
+                            className="px-2 py-1 text-xs bg-gray-100 text-gray-800 rounded hover:bg-gray-200"
+                          >
+                            No Response
+                          </button>
+                        </div>
+                        {application.outcome && (
+                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${
+                            application.outcome === 'Interview' ? 'bg-blue-100 text-blue-800' :
+                            application.outcome === 'Rejected' ? 'bg-red-100 text-red-800' :
+                            application.outcome === 'Hired' ? 'bg-green-100 text-green-800' :
+                            'bg-gray-100 text-gray-800'
+                          }`}>
+                            {application.outcome}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {/* Feedback Analytics Tab */}
+        {activeTab === 'feedback' && (
+          <div className="space-y-6">
+            {/* Analytics Overview */}
+            {feedbackAnalytics && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <BarChart3 className="h-5 w-5" />
+                      Total Feedback
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{feedbackAnalytics.total_feedback}</div>
+                    <p className="text-sm text-muted-foreground">Applications analyzed</p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="h-5 w-5" />
+                      Average Score
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{feedbackAnalytics.avg_probability}%</div>
+                    <p className="text-sm text-muted-foreground">Selection probability</p>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Target className="h-5 w-5" />
+                      High Success Rate
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{feedbackAnalytics.high_probability_percentage}%</div>
+                    <p className="text-sm text-muted-foreground">Applications with 70%+ score</p>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {/* Top Strengths */}
+            {feedbackAnalytics?.top_strengths && feedbackAnalytics.top_strengths.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CheckCircle className="h-5 w-5 text-green-600" />
+                    Top Strengths
+                  </CardTitle>
+                  <CardDescription>
+                    Most commonly identified strengths across applications
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {feedbackAnalytics.top_strengths.map((strength, index) => (
+                      <div key={index} className="flex items-center justify-between p-3 bg-green-50 rounded-lg">
+                        <span className="font-medium text-green-800">{strength.strength}</span>
+                        <Badge variant="success">{strength.count} times</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Common Gaps */}
+            {feedbackAnalytics?.common_gaps && feedbackAnalytics.common_gaps.length > 0 && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-yellow-600" />
+                    Common Improvement Areas
+                  </CardTitle>
+                  <CardDescription>
+                    Most frequently identified gaps across applications
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {feedbackAnalytics.common_gaps.map((gap, index) => (
+                      <div key={index} className="flex items-center justify-between p-3 bg-yellow-50 rounded-lg">
+                        <span className="font-medium text-yellow-800">{gap.gap}</span>
+                        <Badge variant="warning">{gap.count} times</Badge>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Recent Feedback */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Recent Feedback
+                </CardTitle>
+                <CardDescription>
+                  Latest application feedback and scores
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {feedback.length === 0 ? (
+                  <div className="text-center py-8">
+                    <TrendingUp className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                    <h3 className="text-sm font-medium text-foreground">No feedback data yet</h3>
+                    <p className="text-sm text-muted-foreground">Feedback will appear here as users process job applications.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {feedback.slice(0, 10).map((item) => (
+                      <div key={item.id} className="flex items-center justify-between p-4 border rounded-lg">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3">
+                            <div>
+                              <p className="font-medium">{item.jobs?.title} at {item.jobs?.company}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {item.users?.name || item.users?.email} • {new Date(item.created_at).toLocaleDateString()}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <div className="text-right">
+                            <div className="text-lg font-bold">
+                              {item.selection_probability}%
+                            </div>
+                            <div className="text-xs text-muted-foreground">Selection Probability</div>
+                          </div>
+                          <div className="w-16">
+                            <Progress value={item.selection_probability} className="h-2" />
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
           </div>
         )}
       </div>

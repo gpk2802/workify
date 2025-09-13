@@ -14,9 +14,17 @@ Workify is a comprehensive Next.js application that helps job seekers tailor the
 - **Fit Score Calculation**: Semantic similarity scoring using OpenAI embeddings
 - **Application Tracking**: Complete application lifecycle management
 
+### Applicant Feedback Analytics
+- **Probability Scoring**: AI-predicted likelihood of selection (0-100%)
+- **Detailed Insights**: Comprehensive analysis of strengths, gaps, and recommendations
+- **Scoring Model**: Weighted algorithm combining semantic similarity (60%), skill coverage (30%), and experience alignment (10%)
+- **Real-time Feedback**: Immediate feedback generation after job processing
+- **Visual Analytics**: Progress bars, badges, and color-coded insights for easy understanding
+
 ### Admin Features
 - **Admin Dashboard**: Comprehensive admin interface for user and application management
 - **User Management**: Role-based access control with user status management
+- **Feedback Analytics**: System-wide analytics on application success rates, common strengths, and improvement areas
 - **Analytics**: Real-time analytics and reporting
 - **Application Oversight**: Track and manage all user applications
 
@@ -145,6 +153,48 @@ Access the admin dashboard at `/admin` (admin role required). Features include:
 - **Application Tracking**: Monitor all job applications
 - **Analytics**: View system statistics and user growth
 - **Role Management**: Assign admin roles to users
+
+## Testing the Feedback System
+
+### User Flow Testing
+1. **Sign up** for a new account
+2. **Upload a resume** (PDF or text file)
+3. **Set job search preferences** (roles, companies, locations)
+4. **Add a job description** by pasting any job posting
+5. **Process the job** - this will generate tailored content AND feedback
+6. **View feedback** in the "Application Feedback" tab on your dashboard
+
+### Feedback Features to Test
+- **Probability Score**: Check that the selection probability is displayed (0-100%)
+- **Scoring Breakdown**: Verify semantic similarity, skill coverage, and experience alignment scores
+- **Strengths Section**: Look for green-highlighted strengths with confidence scores
+- **Gaps Section**: Check for yellow-highlighted improvement areas with severity levels
+- **Recommendations**: Review actionable recommendations with priority levels
+
+### Admin Testing
+1. **Access admin dashboard** at `/admin` (requires admin role)
+2. **Navigate to "Feedback Analytics" tab**
+3. **View system-wide metrics**:
+   - Total feedback count
+   - Average selection probability
+   - High success rate percentage
+4. **Review analytics**:
+   - Top strengths across all applications
+   - Common improvement areas
+   - Recent feedback with scores
+
+### Database Verification
+Run these SQL queries in Supabase to verify feedback data:
+```sql
+-- Check feedback table structure
+SELECT * FROM feedback LIMIT 5;
+
+-- View feedback analytics
+SELECT * FROM get_system_feedback_analytics(3);
+
+-- Check user feedback stats
+SELECT * FROM get_user_feedback_stats('user-uuid-here', 3);
+```
 
 ## Deployment
 

@@ -4,6 +4,63 @@ import { cookies } from 'next/headers';
 import { Database } from '@/lib/database.types';
 import { calculateSimilarity, generateTailoredContent } from '@/lib/openai';
 import { openaiRateLimit, addRateLimitHeaders } from '@/lib/rateLimit';
+import { generateFeedback } from '@/lib/feedbackAnalytics';
+
+// Async function to generate feedback without blocking the main response
+async function generateFeedbackAsync(tailorId: string, resumeText: string, jobDescription: string) {
+  try {
+    const supabase = createRouteHandlerClient<Database>({ cookies });
+    
+    // Check if feedback already exists
+    const { data: existingFeedback } = await supabase
+      .from('feedback')
+      .select('id')
+      .eq('tailor_id', tailorId)
+      .single();
+
+    if (existingFeedback) {
+      return; // Feedback already exists
+    }
+
+    // Get the tailor data
+    const { data: tailor } = await supabase
+      .from('tailors')
+      .select('user_id, job_id, fit_score')
+      .eq('id', tailorId)
+      .single();
+
+    if (!tailor) {
+      return;
+    }
+
+    // Generate feedback
+    const feedbackScores = await generateFeedback(
+      resumeText,
+      jobDescription,
+      tailor.fit_score || 0
+    );
+
+    // Store feedback in database
+    await supabase
+      .from('feedback')
+      .insert({
+        user_id: tailor.user_id,
+        job_id: tailor.job_id,
+        tailor_id: tailorId,
+        selection_probability: feedbackScores.selection_probability,
+        semantic_similarity_score: feedbackScores.semantic_similarity_score,
+        skill_coverage_score: feedbackScores.skill_coverage_score,
+        experience_alignment_score: feedbackScores.experience_alignment_score,
+        strengths: feedbackScores.strengths,
+        gaps: feedbackScores.gaps,
+        recommendations: feedbackScores.recommendations,
+        model_version: 'v1.0'
+      });
+  } catch (error) {
+    console.error('Error generating feedback asynchronously:', error);
+    // Don't throw - this is async and shouldn't affect the main flow
+  }
+}
 
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
@@ -133,6 +190,9 @@ export async function POST(request: NextRequest, { params }: { params: { id: str
       .from('jobs')
       .update({ status: 'processed' })
       .eq('id', jobId);
+    
+    // Generate feedback asynchronously (don't wait for it)
+    generateFeedbackAsync(tailor.id, profile.resume_text, job.description);
     
     // Return the results
     const response = NextResponse.json({
