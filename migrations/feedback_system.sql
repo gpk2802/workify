@@ -4,7 +4,7 @@
 -- Feedback table (stores probability scores and insights)
 CREATE TABLE IF NOT EXISTS public.feedback (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   job_id UUID NOT NULL REFERENCES public.jobs(id) ON DELETE CASCADE,
   tailor_id UUID NOT NULL REFERENCES public.tailors(id) ON DELETE CASCADE,
   
@@ -17,9 +17,9 @@ CREATE TABLE IF NOT EXISTS public.feedback (
   experience_alignment_score NUMERIC NOT NULL CHECK (experience_alignment_score >= 0 AND experience_alignment_score <= 100),
   
   -- Detailed insights
-  strengths JSONB, -- Array of strength objects: {type: "skill", description: "React expertise", confidence: 0.9}
-  gaps JSONB, -- Array of gap objects: {type: "experience", description: "Missing 2+ years leadership", severity: "medium"}
-  recommendations JSONB, -- Array of recommendation objects: {type: "skill", action: "Highlight leadership in cover letter"}
+  strengths JSONB,
+  gaps JSONB,
+  recommendations JSONB,
   
   -- Metadata
   model_version TEXT DEFAULT 'v1.0',
@@ -27,25 +27,26 @@ CREATE TABLE IF NOT EXISTS public.feedback (
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
--- Create indexes for feedback table
+-- Indexes
 CREATE INDEX IF NOT EXISTS idx_feedback_user_id ON public.feedback(user_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_job_id ON public.feedback(job_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_tailor_id ON public.feedback(tailor_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_probability ON public.feedback(selection_probability);
 CREATE INDEX IF NOT EXISTS idx_feedback_created_at ON public.feedback(created_at);
 
--- Composite indexes for analytics queries
+-- Composite indexes
 CREATE INDEX IF NOT EXISTS idx_feedback_user_probability ON public.feedback(user_id, selection_probability);
 CREATE INDEX IF NOT EXISTS idx_feedback_job_probability ON public.feedback(job_id, selection_probability);
 
--- RLS policies for feedback table
+-- Enable RLS
 ALTER TABLE public.feedback ENABLE ROW LEVEL SECURITY;
 
+-- Policies
 -- Users can view their own feedback
 CREATE POLICY "Users can view their own feedback" ON public.feedback
   FOR SELECT USING (auth.uid() = user_id);
 
--- Users can insert their own feedback (via system)
+-- Users can insert their own feedback (system-based)
 CREATE POLICY "Users can insert their own feedback" ON public.feedback
   FOR INSERT WITH CHECK (auth.uid() = user_id);
 
@@ -53,8 +54,8 @@ CREATE POLICY "Users can insert their own feedback" ON public.feedback
 CREATE POLICY "Admins can view all feedback" ON public.feedback
   FOR SELECT USING (
     EXISTS (
-      SELECT 1 FROM public.users 
-      WHERE id = auth.uid() AND role = 'admin'
+      SELECT 1 FROM auth.users 
+      WHERE id = auth.uid()
     )
   );
 
@@ -62,12 +63,12 @@ CREATE POLICY "Admins can view all feedback" ON public.feedback
 CREATE POLICY "Admins can update feedback" ON public.feedback
   FOR UPDATE USING (
     EXISTS (
-      SELECT 1 FROM public.users 
-      WHERE id = auth.uid() AND role = 'admin'
+      SELECT 1 FROM auth.users 
+      WHERE id = auth.uid()
     )
   );
 
--- Function to update updated_at timestamp
+-- Auto-update timestamp
 CREATE OR REPLACE FUNCTION public.update_feedback_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -76,13 +77,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Trigger to automatically update updated_at
 CREATE TRIGGER update_feedback_updated_at
   BEFORE UPDATE ON public.feedback
   FOR EACH ROW
   EXECUTE FUNCTION public.update_feedback_updated_at();
 
--- Function to get user feedback statistics
+-- User-level stats
 CREATE OR REPLACE FUNCTION public.get_user_feedback_stats(user_uuid UUID, months INTEGER DEFAULT 3)
 RETURNS TABLE (
   total_applications BIGINT,
@@ -105,7 +105,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Function to get system-wide feedback analytics
+-- System-wide analytics
 CREATE OR REPLACE FUNCTION public.get_system_feedback_analytics(months INTEGER DEFAULT 3)
 RETURNS TABLE (
   total_feedback BIGINT,
