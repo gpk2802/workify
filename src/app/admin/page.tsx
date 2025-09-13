@@ -21,6 +21,7 @@ interface Application {
   job_id: string;
   tailor_id: string;
   status: string;
+  outcome: string | null;
   created_at: string;
   users: User;
   jobs: {
@@ -48,8 +49,11 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
+  const [filteredApplications, setFilteredApplications] = useState<Application[]>([]);
   const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'applications'>('overview');
   const [loading, setLoading] = useState(true);
+  const [outcomeFilter, setOutcomeFilter] = useState<string>('all');
+  const [userFilter, setUserFilter] = useState<string>('all');
 
   useEffect(() => {
     if (!isLoading && !user) {
@@ -128,6 +132,7 @@ export default function AdminDashboard() {
         .limit(50);
 
       setApplications(applicationsData || []);
+      setFilteredApplications(applicationsData || []);
     } catch (error) {
       console.error('Error loading dashboard data:', error);
     } finally {
@@ -173,11 +178,75 @@ export default function AdminDashboard() {
       .eq('id', applicationId);
 
     if (!error) {
-      setApplications(applications.map(a => 
+      const updatedApplications = applications.map(a => 
         a.id === applicationId ? { ...a, status: newStatus } : a
-      ));
+      );
+      setApplications(updatedApplications);
+      applyFilters(updatedApplications);
     }
   };
+
+  const updateApplicationOutcome = async (applicationId: string, newOutcome: string) => {
+    const supabase = createClient();
+    const { error } = await supabase
+      .from('applications')
+      .update({ outcome: newOutcome })
+      .eq('id', applicationId);
+
+    if (!error) {
+      const updatedApplications = applications.map(a => 
+        a.id === applicationId ? { ...a, outcome: newOutcome } : a
+      );
+      setApplications(updatedApplications);
+      applyFilters(updatedApplications);
+    }
+  };
+
+  const applyFilters = (apps: Application[]) => {
+    let filtered = apps;
+    
+    if (outcomeFilter !== 'all') {
+      filtered = filtered.filter(app => app.outcome === outcomeFilter);
+    }
+    
+    if (userFilter !== 'all') {
+      filtered = filtered.filter(app => app.user_id === userFilter);
+    }
+    
+    setFilteredApplications(filtered);
+  };
+
+  const exportToCSV = () => {
+    const csvData = applications.map(app => ({
+      'Application ID': app.id,
+      'User Email': app.users?.email || '',
+      'User Name': app.users?.name || '',
+      'Job Title': app.jobs?.title || '',
+      'Company': app.jobs?.company || '',
+      'Fit Score': app.tailors?.fit_score || '',
+      'Status': app.status,
+      'Outcome': app.outcome || 'Not Set',
+      'Applied Date': new Date(app.created_at).toLocaleDateString()
+    }));
+    
+    const csvContent = [
+      Object.keys(csvData[0]).join(','),
+      ...csvData.map(row => Object.values(row).join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `applications_export_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
+  // Apply filters when filter values change
+  useEffect(() => {
+    applyFilters(applications);
+  }, [outcomeFilter, userFilter, applications]);
 
   if (isLoading || loading) {
     return (
